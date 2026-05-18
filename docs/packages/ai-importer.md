@@ -170,7 +170,23 @@ Pour importer un JSON Publiko AI Importer (PrestaShop) tel quel, sans renommer l
 
 **Alias legacy** (configs PrestaShop v0) : `multiply`, `divide`, `add`, `subtract` routent automatiquement vers `MathAction` avec l'opération correspondante. Permet d'importer un JSON PS sans modifier les actions.
 
-### 7.quinquies.11 Limitations connues
+### 7.quinquies.11 Diagnostic des imports LLM
+
+Quand un `llm_transform` (ou n'importe quelle source) émet un handle de `Collection` ou de `FeatureFamily`/`FeatureValue` qui n'existe pas en DB, le writer **ne plante pas** : le record est écrit normalement, et un `ImportLog` warning est créé avec le détail des handles ignorés. Visible dans l'onglet **Logs** de chaque `ImportJob` (RelationManager temps-réel).
+
+Exemple de message :
+
+```
+[SKU-12345] handle(s) introuvable(s) — 2 collection(s), 3 feature(s) ignoré(s).
+context: {
+  collections: ["categorie-inexistante", "autre-cat"],
+  features: ["family:application", "value:matiere.unobtanium"]
+}
+```
+
+Stratégie : afficher la liste des handles autorisés au LLM via `llm_global_context` (cf JSON Publiko AI Importer). Pour les rares hallucinations restantes, l'admin diagnostique via les logs et choisit : créer la catégorie/feature manquante, ou affiner le prompt.
+
+### 7.quinquies.12 Limitations connues
 
 - ProductType : le writer utilise le premier `ProductType` trouvé (ordre `id asc`) si `product_type_handle` absent. Pour forcer, ajouter la clé au staging.
 - TaxClass : idem, premier trouvé (fallback de `tax_class_handle`).

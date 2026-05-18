@@ -15,9 +15,12 @@ use Lunar\Models\Product;
 use Lunar\Models\ProductType;
 use Lunar\Models\ProductVariant;
 use Lunar\Models\TaxClass;
+use Pko\AiImporter\Enums\LogLevel;
 use Pko\AiImporter\Enums\StagingStatus;
+use Pko\AiImporter\Models\ImportLog;
 use Pko\AiImporter\Models\StagingRecord;
 use Pko\CatalogFeatures\Facades\Features;
+use Pko\CatalogFeatures\Models\FeatureFamily;
 use Pko\ProductVideos\Services\ProductVideoManager;
 
 /**
@@ -52,6 +55,12 @@ use Pko\ProductVideos\Services\ProductVideoManager;
  *                           déjà attachée au produit = skip, URL non reconnue = counted as error.
  *
  * Anything the writer doesn't recognise is ignored.
+ *
+ * Unresolved handles (`collections` or `features`) — handles that don't match
+ * an existing Collection / FeatureFamily / FeatureValue — are NOT a hard error.
+ * The record is still written successfully ; an `ImportLog` warning is recorded
+ * with the list of skipped handles for diagnostic. Common with LLM-driven imports
+ * where the model can hallucinate handles outside the allowed taxonomy.
  *
  * Legacy aliases (PrestaShop FAB-DIS compat — auto-normalised on entry, canonical key wins):
  *   - `ean13` → `ean`, `quantity` → `stock`, `manufacturer` → `brand_name`,
@@ -156,14 +165,18 @@ final class LunarProductWriter
             $this->upsertPrice($variant, (int) $data['price_cents'], isset($data['compare_price_cents']) ? (int) $data['compare_price_cents'] : null);
         }
 
+        $unresolved = ['collections' => [], 'features' => []];
+
         if (! empty($data['collections'])) {
-            $ids = $this->resolveCollectionIds($data['collections']);
-            if ($ids !== []) {
-                $product->collections()->syncWithoutDetaching($ids);
+            $resolution = $this->resolveCollectionIds($data['collections']);
+            if ($resolution['ids'] !== []) {
+                $product->collections()->syncWithoutDetaching($resolution['ids']);
             }
+            $unresolved['collections'] = $resolution['unresolved'];
         }
 
         if (! empty($data['features']) && is_array($data['features']) && class_exists(Features::class)) {
+            $unresolved['features'] = $this->findUnresolvedFeatures($data['features']);
             Features::syncByHandles($product, $data['features']);
         }
 
@@ -184,6 +197,8 @@ final class LunarProductWriter
             'imported_at' => now(),
             'error_message' => null,
         ]);
+
+        $this->logUnresolvedHandles($record, $sku, $unresolved);
     }
 
     /**
@@ -261,12 +276,17 @@ final class LunarProductWriter
     }
 
     /**
-     * @return array<int, int>
+     * Resolve a list of collection IDs or handles to int IDs. Unresolved handles
+     * (no Collection with that handle in DB) are returned separately for warning
+     * surfacing — common when an LLM emits a handle that doesn't exist yet.
+     *
+     * @return array{ids: array<int, int>, unresolved: array<int, string>}
      */
     private function resolveCollectionIds(mixed $value): array
     {
         $raw = is_array($value) ? $value : array_filter(array_map('trim', explode(',', (string) $value)));
         $ids = [];
+        $unresolved = [];
 
         foreach ($raw as $token) {
             if (is_numeric($token)) {
@@ -275,6 +295,9 @@ final class LunarProductWriter
                 continue;
             }
             $handle = (string) $token;
+            if ($handle === '') {
+                continue;
+            }
             if (isset($this->collectionHandleCache[$handle])) {
                 $ids[] = $this->collectionHandleCache[$handle];
 
@@ -283,10 +306,84 @@ final class LunarProductWriter
             $collection = \Lunar\Models\Collection::query()->where('handle', $handle)->first();
             if ($collection) {
                 $ids[] = $this->collectionHandleCache[$handle] = (int) $collection->id;
+            } else {
+                $unresolved[] = $handle;
             }
         }
 
-        return array_values(array_unique($ids));
+        return [
+            'ids' => array_values(array_unique($ids)),
+            'unresolved' => array_values(array_unique($unresolved)),
+        ];
+    }
+
+    /**
+     * Identify family or value handles from a `features` hash that don't match
+     * any FeatureFamily / FeatureValue in DB. Returned as a flat list like
+     * `["family:unknown_family", "value:unknown_family.unknown_value"]` for
+     * easy filter/sort in logs.
+     *
+     * @param  array<string, array<int, string>>  $features
+     * @return array<int, string>
+     */
+    private function findUnresolvedFeatures(array $features): array
+    {
+        if ($features === [] || ! class_exists(FeatureFamily::class)) {
+            return [];
+        }
+
+        $families = FeatureFamily::query()
+            ->whereIn('handle', array_keys($features))
+            ->with('values:id,feature_family_id,handle')
+            ->get()
+            ->keyBy('handle');
+
+        $unresolved = [];
+
+        foreach ($features as $familyHandle => $valueHandles) {
+            $family = $families->get($familyHandle);
+            if ($family === null) {
+                $unresolved[] = "family:{$familyHandle}";
+
+                continue;
+            }
+            $known = $family->values->pluck('handle')->all();
+            foreach ((array) $valueHandles as $value) {
+                $value = (string) $value;
+                if ($value !== '' && ! in_array($value, $known, true)) {
+                    $unresolved[] = "value:{$familyHandle}.{$value}";
+                }
+            }
+        }
+
+        return $unresolved;
+    }
+
+    /**
+     * @param  array{collections: array<int, string>, features: array<int, string>}  $unresolved
+     */
+    private function logUnresolvedHandles(StagingRecord $record, string $sku, array $unresolved): void
+    {
+        if ($unresolved['collections'] === [] && $unresolved['features'] === []) {
+            return;
+        }
+
+        $parts = [];
+        if ($unresolved['collections'] !== []) {
+            $parts[] = count($unresolved['collections']).' collection(s)';
+        }
+        if ($unresolved['features'] !== []) {
+            $parts[] = count($unresolved['features']).' feature(s)';
+        }
+
+        ImportLog::query()->create([
+            'import_job_id' => $record->import_job_id,
+            'row_number' => $record->row_number,
+            'level' => LogLevel::Warning,
+            'message' => "[{$sku}] handle(s) introuvable(s) — ".implode(', ', $parts).' ignoré(s).',
+            'context' => array_filter($unresolved, static fn (array $v) => $v !== []),
+            'created_at' => now(),
+        ]);
     }
 
     private function upsertPrice(ProductVariant $variant, int $priceCents, ?int $comparePriceCents): void
