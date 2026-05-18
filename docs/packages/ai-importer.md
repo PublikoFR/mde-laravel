@@ -116,14 +116,81 @@ Les clés suivantes, si présentes dans `StagingRecord::data`, déclenchent une 
 | `brand_name` | `Product::brand_id` | `Brand::firstOrCreate(['name' => ...])` |
 | `collections` | `Product::collections()` | Array ou CSV, int (ID) ou string (handle). `syncWithoutDetaching` |
 | `features` | pivot `pko_feature_value_product` | Hash `{family_handle => [value_handle, ...]}`, delegated à `catalog-features` |
+| `images` | Spatie MediaLibrary | Array ou CSV d'URLs distantes. Idempotent via `custom_properties.source_url`, première URL `primary=true`. |
+| `videos` | `pko/product-videos` | Array ou CSV d'URLs YouTube/Vimeo/Dailymotion/MP4. Idempotent par URL. |
+| `product_type_handle` | ProductType | Lookup par handle, fallback sur premier trouvé |
+| `tax_class_handle` | TaxClass | Lookup par handle, fallback sur premier trouvé |
+| `compare_price_cents` | `Price::compare_price` | Prix barré |
 
 Les clés inconnues du writer sont **ignorées silencieusement** — le config author peut donc émettre des keys arbitraires pour d'autres consommateurs downstream.
 
-### 7.quinquies.10 Limitations connues
+#### Aliases legacy PrestaShop FAB-DIS (auto-normalisés par `LunarProductWriter::normalizeLegacyKeys`)
 
-- Images produits : Spatie MediaLibrary `addMediaFromUrl` pas câblé en phase 4 (à faire via une action `image_download` ou une clé `images[]` reconnue par le writer — à trancher).
-- ProductType : le writer utilise le premier `ProductType` trouvé (ordre `id asc`). À remplacer par une résolution via clé `product_type_handle` sur le staging row.
-- TaxClass : idem, premier trouvé.
+Pour importer un JSON Publiko AI Importer (PrestaShop) tel quel, sans renommer les clés du mapping, le writer accepte ces alias et les remappe vers la clé canonique ci-dessus. **La clé canonique gagne toujours** quand les deux sont présentes — l'alias est ignoré.
+
+| Alias PS | Clé canonique | Conversion |
+|---|---|---|
+| `ean13` | `ean` | — |
+| `quantity` | `stock` | cast int |
+| `manufacturer` | `brand_name` | — |
+| `link_rewrite` | `url_key` | — |
+| `width` | `width_value` | cast float |
+| `height` | `height_value` | cast float |
+| `depth` | `length_value` | cast float (axes : depth PS = length Lunar) |
+| `weight` | `weight_value` | cast float |
+| `image` | `images` | passe array ou CSV inchangé |
+| `category` | `collections` | passe array ou CSV inchangé |
+| `price_tex` | `price_cents` | **×100 puis `(int) round()`** (euros → cents) |
+
+### 7.quinquies.10 Actions disponibles (19 + 4 alias legacy)
+
+| Type | Rôle |
+|---|---|
+| `math` | Opération arithmétique (`operation: multiply|divide|add|subtract`) |
+| `round` | Arrondi à N décimales |
+| `change_case` | upper / lower / capitalize |
+| `trim` | both / left / right |
+| `truncate` | Coupe à N caractères avec suffix optionnel |
+| `slugify` | URL-safe (kebab-case) |
+| `prefix` | Préfixe une string littérale (avec separator optionnel) |
+| `suffix` | Suffixe une string littérale |
+| `replace` | Search/replace littéral |
+| `regex_replace` | Search/replace via pattern PCRE |
+| `date_format` | Conversion entre patterns de date |
+| `validate_ean13` | Valide checksum EAN13 (sinon vide) |
+| `concat` | Concatène plusieurs colonnes de la row primaire |
+| `template` | Interpole `{placeholders}` depuis sources nommées |
+| `copy` | Recopie une autre colonne (déjà mappée ou brute) |
+| `map` | Lookup `{from => to}`, support multi-value avec séparateur |
+| `llm_transform` | Appel LLM (Claude/OpenAI) avec prompt + sources |
+| `multiline_aggregate` | Agrège plusieurs lignes d'une sheet many (concat/count/json_array) |
+| `feature_build` | Construit le hash `features` depuis N colonnes source |
+| `parse_features_string` | Parse `"F1:V1,V2|F2:V3"` (sortie LLM) → `{f1:[v1,v2]}` slugifié |
+| `parse_category_breadcrumb` | Parse `"A>B>C,D>E"` → CSV de handles, mode `leaf` (défaut) ou `all` |
+| `condition` | Branching `if/else` avec branches/rules/else_actions. Support `field: "sheet:col"` ou `"col_value"`, opérateurs `=`/`!=`/`>`/`<`/`contains`/`empty`/`in`. Premier match wins. Pas de récursion (nested condition silencieusement skip). |
+
+**Alias legacy** (configs PrestaShop v0) : `multiply`, `divide`, `add`, `subtract` routent automatiquement vers `MathAction` avec l'opération correspondante. Permet d'importer un JSON PS sans modifier les actions.
+
+### 7.quinquies.11 Diagnostic des imports LLM
+
+Quand un `llm_transform` (ou n'importe quelle source) émet un handle de `Collection` ou de `FeatureFamily`/`FeatureValue` qui n'existe pas en DB, le writer **ne plante pas** : le record est écrit normalement, et un `ImportLog` warning est créé avec le détail des handles ignorés. Visible dans l'onglet **Logs** de chaque `ImportJob` (RelationManager temps-réel).
+
+Exemple de message :
+
+```
+[SKU-12345] handle(s) introuvable(s) — 2 collection(s), 3 feature(s) ignoré(s).
+context: {
+  collections: ["categorie-inexistante", "autre-cat"],
+  features: ["family:application", "value:matiere.unobtanium"]
+}
+```
+
+Stratégie : afficher la liste des handles autorisés au LLM via `llm_global_context` (cf JSON Publiko AI Importer). Pour les rares hallucinations restantes, l'admin diagnostique via les logs et choisit : créer la catégorie/feature manquante, ou affiner le prompt.
+
+### 7.quinquies.12 Limitations connues
+
+- ProductType : le writer utilise le premier `ProductType` trouvé (ordre `id asc`) si `product_type_handle` absent. Pour forcer, ajouter la clé au staging.
+- TaxClass : idem, premier trouvé (fallback de `tax_class_handle`).
 - True streaming XLSX : `PhpSpreadsheet::load()` charge tout en RAM. Au-delà de ~100k lignes, basculer sur un `IReadFilter` chunked — l'API parser reste stable.
 - Éditeur config visual : reste en textarea JSON (phase 5+).
 - Appels LLM réels non testés automatiquement (nécessitent une clé API valide, hors CI).

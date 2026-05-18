@@ -6,6 +6,7 @@ namespace Pko\AiImporter\Actions;
 
 use Pko\AiImporter\Actions\Types\ChangeCaseAction;
 use Pko\AiImporter\Actions\Types\ConcatAction;
+use Pko\AiImporter\Actions\Types\ConditionAction;
 use Pko\AiImporter\Actions\Types\CopyAction;
 use Pko\AiImporter\Actions\Types\DateFormatAction;
 use Pko\AiImporter\Actions\Types\FeatureBuildAction;
@@ -13,6 +14,8 @@ use Pko\AiImporter\Actions\Types\LlmTransformAction;
 use Pko\AiImporter\Actions\Types\MapAction;
 use Pko\AiImporter\Actions\Types\MathAction;
 use Pko\AiImporter\Actions\Types\MultilineAggregateAction;
+use Pko\AiImporter\Actions\Types\ParseCategoryBreadcrumbAction;
+use Pko\AiImporter\Actions\Types\ParseFeaturesStringAction;
 use Pko\AiImporter\Actions\Types\PrefixAction;
 use Pko\AiImporter\Actions\Types\RegexReplaceAction;
 use Pko\AiImporter\Actions\Types\ReplaceAction;
@@ -55,12 +58,15 @@ final class ActionRegistry
             DateFormatAction::class,
             ValidateEan13Action::class,
             ConcatAction::class,
+            ConditionAction::class,
             TemplateAction::class,
             CopyAction::class,
             MapAction::class,
             LlmTransformAction::class,
             MultilineAggregateAction::class,
             FeatureBuildAction::class,
+            ParseFeaturesStringAction::class,
+            ParseCategoryBreadcrumbAction::class,
         ] as $class) {
             self::register($class::type(), $class);
         }

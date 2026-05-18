@@ -35,10 +35,12 @@ final class MultilineAggregateAction extends Action
     public function execute(mixed $value, ExecutionContext $ctx): mixed
     {
         $rows = $ctx->sheets[$this->sheet] ?? [];
-        if ($this->filter_type !== null) {
+        if ($this->filter_type !== null && $this->filter_type !== '') {
+            // Accept either a single type ("PHOTO") or a CSV ("NOTICE,BROCH").
+            $allowed = array_map('trim', explode(',', $this->filter_type));
             $rows = array_values(array_filter(
                 $rows,
-                fn (array $r): bool => ($r['type'] ?? null) === $this->filter_type,
+                fn (array $r): bool => in_array((string) ($r['type'] ?? ''), $allowed, true),
             ));
         }
 

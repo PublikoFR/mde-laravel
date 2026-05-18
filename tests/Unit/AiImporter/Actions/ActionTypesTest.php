@@ -187,6 +187,28 @@ class ActionTypesTest extends TestCase
         $this->assertSame(3, $action->execute(null, $this->ctx([], $sheets)));
     }
 
+    public function test_multiline_aggregate_filter_type_accepts_csv(): void
+    {
+        $sheets = [
+            'M' => [
+                ['type' => 'NOTICE', 'url' => 'notice.pdf'],
+                ['type' => 'PHOTO', 'url' => 'a.jpg'],
+                ['type' => 'BROCH', 'url' => 'brochure.pdf'],
+                ['type' => 'VIDEO', 'url' => 'v.mp4'],
+            ],
+        ];
+
+        $action = Action::make([
+            'type' => 'multiline_aggregate',
+            'sheet' => 'M',
+            'method' => 'count',
+            'filter_type' => 'NOTICE,BROCH',
+            'columns' => ['url'],
+        ]);
+
+        $this->assertSame(2, $action->execute(null, $this->ctx([], $sheets)));
+    }
+
     public function test_prefix_prepends_text(): void
     {
         $action = Action::make(['type' => 'prefix', 'text' => 'SOM']);
@@ -236,5 +258,205 @@ class ActionTypesTest extends TestCase
 
         $this->assertSame(15.0, $add->execute(10, $this->ctx()));
         $this->assertSame(7.0, $sub->execute(10, $this->ctx()));
+    }
+
+    public function test_parse_features_string_default_format(): void
+    {
+        $action = Action::make(['type' => 'parse_features_string']);
+
+        $result = $action->execute('Couleur:Rouge,Bleu|Matière:Aluminium|Application:BSO,Volet roulant', $this->ctx());
+
+        $this->assertSame([
+            'couleur' => ['rouge', 'bleu'],
+            'matiere' => ['aluminium'],
+            'application' => ['bso', 'volet-roulant'],
+        ], $result);
+    }
+
+    public function test_parse_features_string_empty_input_returns_empty_array(): void
+    {
+        $action = Action::make(['type' => 'parse_features_string']);
+
+        $this->assertSame([], $action->execute('', $this->ctx()));
+        $this->assertSame([], $action->execute('   ', $this->ctx()));
+    }
+
+    public function test_parse_features_string_skips_malformed_pairs(): void
+    {
+        $action = Action::make(['type' => 'parse_features_string']);
+
+        $result = $action->execute('Garbage|OnlyKey:|:OnlyValue|Real:Yes', $this->ctx());
+
+        $this->assertSame(['real' => ['yes']], $result);
+    }
+
+    public function test_parse_features_string_no_slugify_keeps_raw(): void
+    {
+        $action = Action::make(['type' => 'parse_features_string', 'slugify' => false]);
+
+        $result = $action->execute('couleur:Rouge,Bleu', $this->ctx());
+
+        $this->assertSame(['couleur' => ['Rouge', 'Bleu']], $result);
+    }
+
+    public function test_parse_features_string_custom_separators(): void
+    {
+        $action = Action::make([
+            'type' => 'parse_features_string',
+            'family_separator' => ';',
+            'kv_separator' => '=',
+            'value_separator' => '/',
+        ]);
+
+        $result = $action->execute('couleur=rouge/bleu;matiere=aluminium', $this->ctx());
+
+        $this->assertSame([
+            'couleur' => ['rouge', 'bleu'],
+            'matiere' => ['aluminium'],
+        ], $result);
+    }
+
+    public function test_parse_category_breadcrumb_leaf_mode_default(): void
+    {
+        $action = Action::make(['type' => 'parse_category_breadcrumb']);
+
+        $result = $action->execute('Accueil>Motorisation>Moteur filaire,Accueil>Domotique', $this->ctx());
+
+        $this->assertSame('moteur-filaire,domotique', $result);
+    }
+
+    public function test_parse_category_breadcrumb_all_mode_keeps_every_segment(): void
+    {
+        $action = Action::make(['type' => 'parse_category_breadcrumb', 'mode' => 'all']);
+
+        $result = $action->execute('Accueil>Motorisation>Moteur filaire', $this->ctx());
+
+        $this->assertSame('accueil,motorisation,moteur-filaire', $result);
+    }
+
+    public function test_parse_category_breadcrumb_dedupes_handles(): void
+    {
+        $action = Action::make(['type' => 'parse_category_breadcrumb']);
+
+        $result = $action->execute('A>B>Moteur filaire,X>Y>Moteur filaire', $this->ctx());
+
+        $this->assertSame('moteur-filaire', $result);
+    }
+
+    public function test_parse_category_breadcrumb_empty_input(): void
+    {
+        $action = Action::make(['type' => 'parse_category_breadcrumb']);
+
+        $this->assertSame('', $action->execute('', $this->ctx()));
+        $this->assertSame('', $action->execute('   ', $this->ctx()));
+    }
+
+    public function test_condition_first_matching_branch_wins(): void
+    {
+        $action = Action::make([
+            'type' => 'condition',
+            'branches' => [
+                [
+                    'logic' => 'AND',
+                    'rules' => [['field' => 'flag', 'operator' => '=', 'value' => 'A']],
+                    'actions' => [['type' => 'math', 'operation' => 'multiply', 'value' => 2]],
+                ],
+                [
+                    'logic' => 'AND',
+                    'rules' => [['field' => 'flag', 'operator' => '=', 'value' => 'B']],
+                    'actions' => [['type' => 'math', 'operation' => 'multiply', 'value' => 3]],
+                ],
+            ],
+            'else_actions' => [['type' => 'math', 'operation' => 'multiply', 'value' => 10]],
+        ]);
+
+        $this->assertSame(20.0, $action->execute(10, $this->ctx(['flag' => 'A'])));
+        $this->assertSame(30.0, $action->execute(10, $this->ctx(['flag' => 'B'])));
+        $this->assertSame(100.0, $action->execute(10, $this->ctx(['flag' => 'Z'])));
+    }
+
+    public function test_condition_supports_sheet_col_field_syntax(): void
+    {
+        $action = Action::make([
+            'type' => 'condition',
+            'branches' => [[
+                'rules' => [['field' => 'B01:AB', 'operator' => '=', 'value' => 'GTK']],
+                'actions' => [['type' => 'math', 'operation' => 'multiply', 'value' => 1.2]],
+            ]],
+            'else_actions' => [['type' => 'math', 'operation' => 'multiply', 'value' => 1.0]],
+        ]);
+
+        $sheets = ['B01' => [['AB' => 'GTK', 'M' => 100]]];
+
+        $this->assertSame(120.0, $action->execute(100, $this->ctx([], $sheets)));
+    }
+
+    public function test_condition_or_logic(): void
+    {
+        $action = Action::make([
+            'type' => 'condition',
+            'branches' => [[
+                'logic' => 'OR',
+                'rules' => [
+                    ['field' => 'cat', 'operator' => '=', 'value' => 'A'],
+                    ['field' => 'cat', 'operator' => '=', 'value' => 'B'],
+                ],
+                'actions' => [['type' => 'math', 'operation' => 'add', 'value' => 1]],
+            ]],
+            'else_actions' => [],
+        ]);
+
+        $this->assertSame(11.0, $action->execute(10, $this->ctx(['cat' => 'A'])));
+        $this->assertSame(11.0, $action->execute(10, $this->ctx(['cat' => 'B'])));
+        $this->assertSame(10, $action->execute(10, $this->ctx(['cat' => 'C']))); // else_actions vide → valeur inchangée
+    }
+
+    public function test_condition_in_operator_with_csv_value(): void
+    {
+        $action = Action::make([
+            'type' => 'condition',
+            'branches' => [[
+                'rules' => [['field' => 'cat', 'operator' => 'in', 'value' => 'A,B,C']],
+                'actions' => [['type' => 'math', 'operation' => 'multiply', 'value' => 2]],
+            ]],
+            'else_actions' => [['type' => 'math', 'operation' => 'multiply', 'value' => 1]],
+        ]);
+
+        $this->assertSame(20.0, $action->execute(10, $this->ctx(['cat' => 'B'])));
+        $this->assertSame(10.0, $action->execute(10, $this->ctx(['cat' => 'Z'])));
+    }
+
+    public function test_condition_no_branch_matches_runs_else_actions(): void
+    {
+        $action = Action::make([
+            'type' => 'condition',
+            'branches' => [[
+                'rules' => [['field' => 'never', 'operator' => '=', 'value' => 'never']],
+                'actions' => [['type' => 'math', 'operation' => 'multiply', 'value' => 100]],
+            ]],
+            'else_actions' => [['type' => 'math', 'operation' => 'multiply', 'value' => 3]],
+        ]);
+
+        $this->assertSame(30.0, $action->execute(10, $this->ctx(['flag' => 'X'])));
+    }
+
+    public function test_condition_nested_self_is_silently_ignored(): void
+    {
+        // Defensive: chaining condition inside a branch's actions is no-op to
+        // avoid pathological recursion. Use a top-level chain of conditions
+        // at the column level instead.
+        $action = Action::make([
+            'type' => 'condition',
+            'branches' => [[
+                'rules' => [['field' => 'flag', 'operator' => '=', 'value' => 'A']],
+                'actions' => [
+                    ['type' => 'condition', 'branches' => []], // ignored
+                    ['type' => 'math', 'operation' => 'multiply', 'value' => 2],
+                ],
+            ]],
+            'else_actions' => [],
+        ]);
+
+        $this->assertSame(20.0, $action->execute(10, $this->ctx(['flag' => 'A'])));
     }
 }
