@@ -24,7 +24,7 @@ class HomeSlidesTable extends BaseWidget
                     Action::make('create')
                         ->label(__('admin-nav::admin.hubs.homepage.actions.create_slide'))
                         ->icon('heroicon-m-plus')
-                        ->url(HomeSlideResource::getUrl('create')),
+                        ->url(HomeSlideResource::getUrl('index')),
                 ])
         );
     }

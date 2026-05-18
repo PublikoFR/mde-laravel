@@ -39,7 +39,5 @@ if ($isPro) {
         <span class="text-sm text-neutral-500 italic">Prix sur demande</span>
     @endif
 @else
-    <x-ui.button variant="primary" :size="$ctaSize" href="/connexion" icon="user" class="w-full justify-center">
-        Connectez-vous pour voir vos prix
-    </x-ui.button>
+    <p class="text-sm text-neutral-500 italic">Prix réservé aux professionnels connectés</p>
 @endif

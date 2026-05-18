@@ -24,7 +24,7 @@ class HomeOffersTable extends BaseWidget
                     Action::make('create')
                         ->label(__('admin-nav::admin.hubs.homepage.actions.create_offer'))
                         ->icon('heroicon-m-plus')
-                        ->url(HomeOfferResource::getUrl('create')),
+                        ->url(HomeOfferResource::getUrl('index')),
                 ])
         );
     }

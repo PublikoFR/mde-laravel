@@ -24,7 +24,7 @@ class HomeTilesTable extends BaseWidget
                     Action::make('create')
                         ->label(__('admin-nav::admin.hubs.homepage.actions.create_tile'))
                         ->icon('heroicon-m-plus')
-                        ->url(HomeTileResource::getUrl('create')),
+                        ->url(HomeTileResource::getUrl('index')),
                 ])
         );
     }

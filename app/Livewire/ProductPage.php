@@ -116,7 +116,7 @@ class ProductPage extends Component
      */
     public function getDocumentsProperty(): Collection
     {
-        if (! auth('customers')->check()) {
+        if (! auth()->check()) {
             return collect();
         }
 

@@ -24,6 +24,7 @@ use Lunar\Admin\Filament\Resources\BrandResource;
 use Lunar\Admin\Filament\Resources\CollectionGroupResource;
 use Lunar\Admin\Filament\Resources\CollectionResource;
 use Lunar\Admin\Filament\Resources\CustomerResource;
+use Lunar\Admin\Filament\Resources\OrderResource\Pages\ManageOrder;
 use Lunar\Admin\Filament\Resources\ProductOptionResource;
 use Lunar\Admin\Filament\Resources\ProductResource;
 use Lunar\Admin\Filament\Resources\ProductTypeResource;
@@ -43,6 +44,8 @@ use Pko\CatalogFeatures\Filament\CatalogFeaturesPlugin;
 use Pko\CatalogFeatures\Filament\Extensions\ProductFeaturesExtension;
 use Pko\Loyalty\Filament\Extensions\CustomerLoyaltyExtension;
 use Pko\Loyalty\Filament\LoyaltyPlugin;
+use Pko\Pennylane\Filament\Extensions\OrderInvoiceActionsExtension;
+use Pko\Pennylane\Filament\PennylanePlugin;
 use Pko\ProductDocuments\ProductDocumentsPlugin;
 use Pko\Secrets\Facades\Secrets;
 use Pko\ShippingCommon\Filament\SwapLunarShippingResourcesPlugin;
@@ -75,6 +78,10 @@ class AppServiceProvider extends ServiceProvider
                     in: base_path('packages/pko/shipping-common/src/Filament/Clusters'),
                     for: 'Pko\\ShippingCommon\\Filament\\Clusters',
                 )
+                ->discoverClusters(
+                    in: base_path('packages/pko/lunar-admin-nav/src/Filament/Clusters'),
+                    for: 'Pko\\AdminNav\\Filament\\Clusters',
+                )
                 ->plugin(FilamentShieldPlugin::make())
                 ->plugin(ShippingPlugin::make())
                 ->plugin(SwapLunarShippingResourcesPlugin::make())
@@ -86,6 +93,7 @@ class AppServiceProvider extends ServiceProvider
                 ->plugin(StorefrontCmsPlugin::make())
                 ->plugin(StoreLocatorPlugin::make())
                 ->plugin(MediaManagerShimPlugin::make())
+                ->plugin(PennylanePlugin::make())
                 ->plugin(AdminNavPlugin::make());
         })->register();
 
@@ -103,6 +111,9 @@ class AppServiceProvider extends ServiceProvider
             ],
             CustomerResource::class => [
                 CustomerLoyaltyExtension::class,
+            ],
+            ManageOrder::class => [
+                OrderInvoiceActionsExtension::class,
             ],
             Dashboard::class => [
                 DisableBrokenChartsExtension::class,
@@ -187,6 +198,20 @@ class AppServiceProvider extends ServiceProvider
             ],
             defaultSource: 'env',
             label: 'La Poste — API Suivi',
+        );
+
+        Secrets::register(
+            'pennylane',
+            keys: [
+                'api_token' => 'PENNYLANE_API_TOKEN',
+                'invoice_template_id' => 'PENNYLANE_INVOICE_TEMPLATE_ID',
+            ],
+            defaultSource: 'env',
+            label: 'Pennylane',
+            configMap: [
+                'api_token' => 'pennylane.api_token',
+                'invoice_template_id' => 'pennylane.customer_invoice_template_id',
+            ],
         );
     }
 

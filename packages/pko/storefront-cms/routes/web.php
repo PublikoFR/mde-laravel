@@ -16,7 +16,7 @@ Route::middleware('web')->group(function (): void {
     Route::get('/marque/{slug}', [BrandController::class, 'show'])->name('brand.view');
 
     // Redirects 301 des anciennes URLs vers /{postTypeSegment}/{slug}
-    Route::get('/actualites/{slug}', [PostController::class, 'legacyArticleRedirect']);
+    Route::get('/article/{slug}', [PostController::class, 'legacyArticleRedirect']);
     Route::get('/pages/{slug}', [PostController::class, 'legacyPageRedirect']);
 
     /**
