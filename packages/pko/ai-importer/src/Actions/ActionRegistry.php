@@ -6,6 +6,7 @@ namespace Pko\AiImporter\Actions;
 
 use Pko\AiImporter\Actions\Types\ChangeCaseAction;
 use Pko\AiImporter\Actions\Types\ConcatAction;
+use Pko\AiImporter\Actions\Types\ConditionAction;
 use Pko\AiImporter\Actions\Types\CopyAction;
 use Pko\AiImporter\Actions\Types\DateFormatAction;
 use Pko\AiImporter\Actions\Types\FeatureBuildAction;
@@ -57,6 +58,7 @@ final class ActionRegistry
             DateFormatAction::class,
             ValidateEan13Action::class,
             ConcatAction::class,
+            ConditionAction::class,
             TemplateAction::class,
             CopyAction::class,
             MapAction::class,

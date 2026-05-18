@@ -328,4 +328,113 @@ class ActionTypesTest extends TestCase
         $this->assertSame('', $action->execute('', $this->ctx()));
         $this->assertSame('', $action->execute('   ', $this->ctx()));
     }
+
+    public function test_condition_first_matching_branch_wins(): void
+    {
+        $action = Action::make([
+            'type' => 'condition',
+            'branches' => [
+                [
+                    'logic' => 'AND',
+                    'rules' => [['field' => 'flag', 'operator' => '=', 'value' => 'A']],
+                    'actions' => [['type' => 'math', 'operation' => 'multiply', 'value' => 2]],
+                ],
+                [
+                    'logic' => 'AND',
+                    'rules' => [['field' => 'flag', 'operator' => '=', 'value' => 'B']],
+                    'actions' => [['type' => 'math', 'operation' => 'multiply', 'value' => 3]],
+                ],
+            ],
+            'else_actions' => [['type' => 'math', 'operation' => 'multiply', 'value' => 10]],
+        ]);
+
+        $this->assertSame(20.0, $action->execute(10, $this->ctx(['flag' => 'A'])));
+        $this->assertSame(30.0, $action->execute(10, $this->ctx(['flag' => 'B'])));
+        $this->assertSame(100.0, $action->execute(10, $this->ctx(['flag' => 'Z'])));
+    }
+
+    public function test_condition_supports_sheet_col_field_syntax(): void
+    {
+        $action = Action::make([
+            'type' => 'condition',
+            'branches' => [[
+                'rules' => [['field' => 'B01:AB', 'operator' => '=', 'value' => 'GTK']],
+                'actions' => [['type' => 'math', 'operation' => 'multiply', 'value' => 1.2]],
+            ]],
+            'else_actions' => [['type' => 'math', 'operation' => 'multiply', 'value' => 1.0]],
+        ]);
+
+        $sheets = ['B01' => [['AB' => 'GTK', 'M' => 100]]];
+
+        $this->assertSame(120.0, $action->execute(100, $this->ctx([], $sheets)));
+    }
+
+    public function test_condition_or_logic(): void
+    {
+        $action = Action::make([
+            'type' => 'condition',
+            'branches' => [[
+                'logic' => 'OR',
+                'rules' => [
+                    ['field' => 'cat', 'operator' => '=', 'value' => 'A'],
+                    ['field' => 'cat', 'operator' => '=', 'value' => 'B'],
+                ],
+                'actions' => [['type' => 'math', 'operation' => 'add', 'value' => 1]],
+            ]],
+            'else_actions' => [],
+        ]);
+
+        $this->assertSame(11.0, $action->execute(10, $this->ctx(['cat' => 'A'])));
+        $this->assertSame(11.0, $action->execute(10, $this->ctx(['cat' => 'B'])));
+        $this->assertSame(10, $action->execute(10, $this->ctx(['cat' => 'C']))); // else_actions vide → valeur inchangée
+    }
+
+    public function test_condition_in_operator_with_csv_value(): void
+    {
+        $action = Action::make([
+            'type' => 'condition',
+            'branches' => [[
+                'rules' => [['field' => 'cat', 'operator' => 'in', 'value' => 'A,B,C']],
+                'actions' => [['type' => 'math', 'operation' => 'multiply', 'value' => 2]],
+            ]],
+            'else_actions' => [['type' => 'math', 'operation' => 'multiply', 'value' => 1]],
+        ]);
+
+        $this->assertSame(20.0, $action->execute(10, $this->ctx(['cat' => 'B'])));
+        $this->assertSame(10.0, $action->execute(10, $this->ctx(['cat' => 'Z'])));
+    }
+
+    public function test_condition_no_branch_matches_runs_else_actions(): void
+    {
+        $action = Action::make([
+            'type' => 'condition',
+            'branches' => [[
+                'rules' => [['field' => 'never', 'operator' => '=', 'value' => 'never']],
+                'actions' => [['type' => 'math', 'operation' => 'multiply', 'value' => 100]],
+            ]],
+            'else_actions' => [['type' => 'math', 'operation' => 'multiply', 'value' => 3]],
+        ]);
+
+        $this->assertSame(30.0, $action->execute(10, $this->ctx(['flag' => 'X'])));
+    }
+
+    public function test_condition_nested_self_is_silently_ignored(): void
+    {
+        // Defensive: chaining condition inside a branch's actions is no-op to
+        // avoid pathological recursion. Use a top-level chain of conditions
+        // at the column level instead.
+        $action = Action::make([
+            'type' => 'condition',
+            'branches' => [[
+                'rules' => [['field' => 'flag', 'operator' => '=', 'value' => 'A']],
+                'actions' => [
+                    ['type' => 'condition', 'branches' => []], // ignored
+                    ['type' => 'math', 'operation' => 'multiply', 'value' => 2],
+                ],
+            ]],
+            'else_actions' => [],
+        ]);
+
+        $this->assertSame(20.0, $action->execute(10, $this->ctx(['flag' => 'A'])));
+    }
 }

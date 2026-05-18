@@ -167,6 +167,7 @@ Pour importer un JSON Publiko AI Importer (PrestaShop) tel quel, sans renommer l
 | `feature_build` | Construit le hash `features` depuis N colonnes source |
 | `parse_features_string` | Parse `"F1:V1,V2|F2:V3"` (sortie LLM) → `{f1:[v1,v2]}` slugifié |
 | `parse_category_breadcrumb` | Parse `"A>B>C,D>E"` → CSV de handles, mode `leaf` (défaut) ou `all` |
+| `condition` | Branching `if/else` avec branches/rules/else_actions. Support `field: "sheet:col"` ou `"col_value"`, opérateurs `=`/`!=`/`>`/`<`/`contains`/`empty`/`in`. Premier match wins. Pas de récursion (nested condition silencieusement skip). |
 
 **Alias legacy** (configs PrestaShop v0) : `multiply`, `divide`, `add`, `subtract` routent automatiquement vers `MathAction` avec l'opération correspondante. Permet d'importer un JSON PS sans modifier les actions.
 
